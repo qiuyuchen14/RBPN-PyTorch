@@ -37,7 +37,7 @@ parser.add_argument('--patch_size', type=int, default=64, help='0 to use origina
 parser.add_argument('--data_augmentation', type=bool, default=True)
 parser.add_argument('--model_type', type=str, default='RBPN')
 parser.add_argument('--residual', type=bool, default=False)
-parser.add_argument('--pretrained_sr', default='4x_tiktokRBPNF7_epoch_4.pth', help='sr pretrained base model')
+parser.add_argument('--pretrained_sr', default='4x_tiktokRBPNF7_epoch_10.pth', help='sr pretrained base model')
 parser.add_argument('--pretrained', type=bool, default=True)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--prefix', default='F7', help='Location to save checkpoint models')
