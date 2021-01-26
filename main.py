@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from rbpn import Net as RBPN
 from data import get_training_set, get_eval_set
 import pdb
@@ -27,20 +27,21 @@ parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate. Defau
 parser.add_argument('--gpu_mode', type=bool, default=True)
 parser.add_argument('--threads', type=int, default=4, help='number of threads for data loader to use')
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
-parser.add_argument('--gpus', default=2, type=int, help='number of gpu')
+parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
 parser.add_argument('--data_dir', type=str, default='./vimeo_septuplet/sequences')
 parser.add_argument('--file_list', type=str, default='sep_trainlist.txt')
-parser.add_argument('--other_dataset', type=bool, default=False, help="use other dataset than vimeo-90k")
-parser.add_argument('--future_frame', type=bool, default=True, help="use future frame")
-parser.add_argument('--nFrames', type=int, default=7)
+parser.add_argument('--other_dataset', type=bool, default=True, help="use other dataset than vimeo-90k")
+parser.add_argument('--future_frame', type=bool, default=False, help="use future frame")
+parser.add_argument('--nFrames', type=int, default=2)
 parser.add_argument('--patch_size', type=int, default=64, help='0 to use original frame size')
 parser.add_argument('--data_augmentation', type=bool, default=True)
 parser.add_argument('--model_type', type=str, default='RBPN')
 parser.add_argument('--residual', type=bool, default=False)
-parser.add_argument('--pretrained_sr', default='3x_dl10VDBPNF7_epoch_84.pth', help='sr pretrained base model')
-parser.add_argument('--pretrained', type=bool, default=False)
+parser.add_argument('--pretrained_sr', default='4x_tiktokRBPNF7_epoch_10.pth', help='sr pretrained base model')
+parser.add_argument('--pretrained', type=bool, default=True)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--prefix', default='F7', help='Location to save checkpoint models')
+parser.add_argument('--epoch_size', type=int, default=200, help='Size of each epoch')
 
 opt = parser.parse_args()
 gpus_list = range(opt.gpus)
@@ -52,17 +53,18 @@ def train(epoch):
     epoch_loss = 0
     model.train()
     for iteration, batch in enumerate(training_data_loader, 1):
-        input, target, neigbor, flow, bicubic = batch[0], batch[1], batch[2], batch[3], batch[4]
+        input, target, neigbor, neigbor_hd, flow, bicubic = batch[0], batch[1], batch[2], batch[3], batch[4], batch[5]
         if cuda:
             input = Variable(input).cuda(gpus_list[0])
             target = Variable(target).cuda(gpus_list[0])
             bicubic = Variable(bicubic).cuda(gpus_list[0])
             neigbor = [Variable(j).cuda(gpus_list[0]) for j in neigbor]
+            neigbor_hd = [Variable(j).cuda(gpus_list[0]) for j in neigbor_hd]
             flow = [Variable(j).cuda(gpus_list[0]).float() for j in flow]
 
         optimizer.zero_grad()
         t0 = time.time()
-        prediction = model(input, neigbor, flow)
+        prediction = model(input, neigbor, neigbor_hd, flow)
         
         if opt.residual:
             prediction = prediction + bicubic
@@ -98,7 +100,7 @@ if cuda:
     torch.cuda.manual_seed(opt.seed)
 
 print('===> Loading datasets')
-train_set = get_training_set(opt.data_dir, opt.nFrames, opt.upscale_factor, opt.data_augmentation, opt.file_list, opt.other_dataset, opt.patch_size, opt.future_frame)
+train_set = get_training_set(opt.data_dir, opt.nFrames, opt.upscale_factor, opt.data_augmentation, opt.file_list, opt.other_dataset, opt.patch_size, opt.future_frame, opt.epoch_size)
 #test_set = get_eval_set(opt.test_dir, opt.nFrames, opt.upscale_factor, opt.data_augmentation)
 training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
 #testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=False)
@@ -111,7 +113,7 @@ model = torch.nn.DataParallel(model, device_ids=gpus_list)
 criterion = nn.L1Loss()
 
 print('---------- Networks architecture -------------')
-print_network(model)
+#print_network(model)
 print('----------------------------------------------')
 
 if opt.pretrained:
@@ -120,6 +122,8 @@ if opt.pretrained:
         #model= torch.load(model_name, map_location=lambda storage, loc: storage)
         model.load_state_dict(torch.load(model_name, map_location=lambda storage, loc: storage))
         print('Pre-trained SR model is loaded.')
+    else:
+        print("Could not load pre-trained model")
 
 if cuda:
     model = model.cuda(gpus_list[0])
@@ -132,10 +136,10 @@ for epoch in range(opt.start_epoch, opt.nEpochs + 1):
     #test()
 
     # learning rate is decayed by a factor of 10 every half of total epochs
-    if (epoch+1) % (opt.nEpochs/2) == 0:
+    if epoch % (opt.nEpochs/2) == 0:
         for param_group in optimizer.param_groups:
             param_group['lr'] /= 10.0
         print('Learning rate decay: lr={}'.format(optimizer.param_groups[0]['lr']))
             
-    if (epoch+1) % (opt.snapshots) == 0:
+    if epoch % (opt.snapshots) == 0:
         checkpoint(epoch)
